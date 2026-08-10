@@ -3,7 +3,7 @@
 // are always fetched from the network and never cached, so quotes/candles
 // are never stale and API keys never touch the cache.
 
-const CACHE_VERSION = 'ew-shell-v1';
+const CACHE_VERSION = 'ew-shell-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -53,7 +53,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell: cache-first, falling back to network, then updating cache.
+  // Page navigations (installed app launch, address-bar loads, links):
+  // always resolve to the cached app-shell root. This sidesteps Cloudflare's
+  // /index.html <-> / canonical redirect, which is what breaks the
+  // installed Android app when start_url or a link points at index.html
+  // directly.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => response)
+        .catch(() => caches.match('./') || caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Other app-shell assets: cache-first, falling back to network, then updating cache.
   event.respondWith(
     caches.match(request).then((cached) => {
       const networkFetch = fetch(request)
