@@ -2,7 +2,7 @@
   "name": "Earnings Wire — 1H Confluence Scanner",
   "short_name": "Earnings Wire",
   "description": "Scans earnings-reporting stocks for 1H/1D confluence entries with dual-timeframe charting.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
