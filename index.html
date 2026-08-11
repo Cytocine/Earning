@@ -229,7 +229,7 @@
       <p class="subtitle">Scans upcoming reporting stocks using the TrendCross 1H/1D confluence engine (PVT histogram, LinReg trigger, and EMA clouds).</p>
     </div>
     <div class="window-meta">
-      WINDOW <b>Aug 09 – Aug 23, 2026</b><br>
+      WINDOW <b id="metaWindow">—</b><br>
       DISCIPLINE <b>1H Entry + 1D Trend Confluence</b><br>
       TICKERS TRACKED <b id="metaCount">—</b>
     </div>
@@ -520,6 +520,26 @@ const DATA = [
     {sym:"ROST", name:"Ross Stores", time:"TBD"}
   ]}
 ];
+
+// Auto-roll the calendar: drop any date that has already fully passed so only
+// today's and upcoming earnings dates remain (whatever's next in DATA surfaces
+// automatically as old dates fall off).
+function todayStr(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function pruneExpiredDates(){
+  const today = todayStr();
+  let removed = false;
+  for(let i = DATA.length - 1; i >= 0; i--){
+    if(DATA[i].date < today){ DATA.splice(i, 1); removed = true; }
+  }
+  return removed;
+}
+pruneExpiredDates();
 
 // Flat list
 const ALL_EARNINGS_TICKERS = [];
@@ -1183,6 +1203,7 @@ document.getElementById('runScanBtn').addEventListener('click', runConfluenceSca
 
 // Calendar Renderer
 function renderCalendar(){
+  pruneExpiredDates();
   const cal = document.getElementById('calendar'); cal.innerHTML = "";
   let totalCount = 0, bmoCount = 0, amcCount = 0, tbdCount = 0, activeDays = 0;
 
@@ -1226,6 +1247,12 @@ function renderCalendar(){
   });
 
   document.getElementById('metaCount').textContent = totalCount;
+  if(DATA.length){
+    const fmt = ds => { const [y,m,d]=ds.split('-'); return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${+d}, ${y}`; };
+    document.getElementById('metaWindow').textContent = `${fmt(DATA[0].date)} – ${fmt(DATA[DATA.length-1].date)}`;
+  } else {
+    document.getElementById('metaWindow').textContent = 'No upcoming dates';
+  }
   document.getElementById('statStrip').innerHTML = `
     <div class="stat"><div class="n">${totalCount}</div><div class="l">Total Reports</div></div>
     <div class="stat accent-bmo"><div class="n">${bmoCount}</div><div class="l">Before Open</div></div>
