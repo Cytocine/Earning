@@ -297,6 +297,7 @@
     <div class="panel-title">
       <span>🎯 Active Entry Hits (<code id="hitsCountTag">0 Hits</code>)</span>
       <div style="display:flex; gap:6px;">
+        <button class="btn ghost" id="btnExportAllNames" style="font-size:10px; padding:4px 8px;">📦 Export All Names</button>
         <button class="btn ghost" id="btnExportHitsNames" style="font-size:10px; padding:4px 8px;">🏷️ Export Names Only</button>
         <button class="btn ghost" id="btnExportHitsText" style="font-size:10px; padding:4px 8px;">📋 Export Hits List</button>
       </div>
@@ -1056,6 +1057,21 @@ document.getElementById('btnExport').addEventListener('click', () => {
   link.download = `${sym}_Confluence_Analysis.png`;
   link.href = compCanvas.toDataURL('image/png');
   link.click();
+});
+
+// Names-Only Export — ALL scanned tickers (hits and non-hits)
+document.getElementById('btnExportAllNames').addEventListener('click', () => {
+  const allSyms = Object.keys(state.results);
+  if(allSyms.length === 0){ alert('No scan results available to export. Run a scan first.'); return; }
+
+  const textContent = allSyms.join('\n');
+  const blob = new Blob([textContent], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `All_Scanned_Names_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 // Names-Only Export (just the ticker symbols of hits, one per line)
