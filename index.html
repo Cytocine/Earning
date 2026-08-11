@@ -296,7 +296,10 @@
   <div class="panel">
     <div class="panel-title">
       <span>🎯 Active Entry Hits (<code id="hitsCountTag">0 Hits</code>)</span>
-      <button class="btn ghost" id="btnExportHitsText" style="font-size:10px; padding:4px 8px;">📋 Export Hits List</button>
+      <div style="display:flex; gap:6px;">
+        <button class="btn ghost" id="btnExportHitsNames" style="font-size:10px; padding:4px 8px;">🏷️ Export Names Only</button>
+        <button class="btn ghost" id="btnExportHitsText" style="font-size:10px; padding:4px 8px;">📋 Export Hits List</button>
+      </div>
     </div>
     <div class="hits-container" id="hitsList">
       <div class="no-hits">No scan run yet. Click "Run Confluence Scan" to analyze all reporting stocks.</div>
@@ -1053,6 +1056,20 @@ document.getElementById('btnExport').addEventListener('click', () => {
   link.download = `${sym}_Confluence_Analysis.png`;
   link.href = compCanvas.toDataURL('image/png');
   link.click();
+});
+
+// Names-Only Export (just the ticker symbols of hits, one per line)
+document.getElementById('btnExportHitsNames').addEventListener('click', () => {
+  if(state.hits.length === 0){ alert('No hits available to export.'); return; }
+
+  const textContent = state.hits.join('\n');
+  const blob = new Blob([textContent], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Confluence_Hit_Names_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 // Text / CSV Hits Export (One stock per line)
