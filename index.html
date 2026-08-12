@@ -521,21 +521,20 @@ const DATA = [
   ]}
 ];
 
-// Auto-roll the calendar: drop any date that has already fully passed so only
-// today's and upcoming earnings dates remain (whatever's next in DATA surfaces
-// automatically as old dates fall off).
-function todayStr(){
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
+// Auto-roll the calendar: drop any date that isn't at least 7 days out, so
+// only earnings with a full week of lead time remain (whatever's next in
+// DATA surfaces automatically as near-term dates fall off).
 function pruneExpiredDates(){
-  const today = todayStr();
+  const cutoff = new Date();
+  cutoff.setHours(0,0,0,0);
+  cutoff.setDate(cutoff.getDate() + 7); // only keep earnings at least 7 days out
+  const y = cutoff.getFullYear();
+  const m = String(cutoff.getMonth()+1).padStart(2,'0');
+  const d = String(cutoff.getDate()).padStart(2,'0');
+  const cutoffStr = `${y}-${m}-${d}`;
   let removed = false;
   for(let i = DATA.length - 1; i >= 0; i--){
-    if(DATA[i].date < today){ DATA.splice(i, 1); removed = true; }
+    if(DATA[i].date < cutoffStr){ DATA.splice(i, 1); removed = true; }
   }
   return removed;
 }
