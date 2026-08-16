@@ -260,6 +260,13 @@
         </select>
       </div>
       <div class="cfg-field">
+        <label>Finnhub API Key (earnings calendar)</label>
+        <input id="finnhubKey" type="password" placeholder="Finnhub token..." autocomplete="off">
+      </div>
+      <div class="cfg-field">
+        <button class="btn ghost" id="refreshFinnhubBtn" style="width:100%;">🔄 Refresh Earnings Calendar (Finnhub)</button>
+      </div>
+      <div class="cfg-field">
         <label>Ticker Source</label>
         <select id="tickerSource">
           <option value="ALL">All Earnings Tickers</option>
@@ -328,7 +335,9 @@
       <div style="display:flex; gap:6px; align-items:center;">
         <input id="manualSym" placeholder="TICKER..." style="width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:11px; padding:6px; border-radius:4px; text-transform:uppercase;">
         <button class="btn ghost" id="btnManual">Check</button>
-        <button class="btn ghost" id="btnExport" style="border-color:var(--warn); color:var(--warn);">📷 Export Chart</button>
+        <button class="btn ghost" id="btnExport1h" style="border-color:var(--warn); color:var(--warn);">📷 Export 1H</button>
+        <button class="btn ghost" id="btnExport1d" style="border-color:var(--warn); color:var(--warn);">📷 Export 1D</button>
+        <button class="btn ghost" id="btnExport" style="border-color:var(--warn); color:var(--warn);">📷 Export Combined</button>
       </div>
     </div>
 
@@ -387,7 +396,7 @@
 
 <script>
 // Earnings Dataset
-const DATA = [
+let DATA = [
   {date:"2026-08-10", dow:"Mon", entries:[
     {sym:"ALM", name:"Almonty Industries", time:"BMO", eps:"0.07"},
     {sym:"AXSM", name:"Axsome Therapeutics", time:"BMO", eps:"-0.89"},
@@ -518,6 +527,27 @@ const DATA = [
     {sym:"WMT", name:"Walmart", time:"BMO", flag:true},
     {sym:"DE", name:"Deere & Company", time:"BMO"},
     {sym:"ROST", name:"Ross Stores", time:"TBD"}
+  ]},
+  {date:"2026-08-24", dow:"Mon", entries:[
+    {sym:"XPEV", name:"XPeng", time:"BMO"},
+    {sym:"PDD", name:"PDD Holdings", time:"TBD"}
+  ]},
+  {date:"2026-08-25", dow:"Tue", entries:[
+    {sym:"INTU", name:"Intuit", time:"AMC", flag:true}
+  ]},
+  {date:"2026-08-26", dow:"Wed", entries:[
+    {sym:"NVDA", name:"NVIDIA", time:"AMC", flag:true},
+    {sym:"CRM", name:"Salesforce", time:"AMC", flag:true},
+    {sym:"CRWD", name:"CrowdStrike Holdings", time:"AMC", flag:true},
+    {sym:"SNPS", name:"Synopsys", time:"AMC"}
+  ]},
+  {date:"2026-08-27", dow:"Thu", entries:[
+    {sym:"BILI", name:"Bilibili", time:"BMO"},
+    {sym:"BBY", name:"Best Buy", time:"BMO", flag:true},
+    {sym:"LI", name:"Li Auto", time:"TBD"},
+    {sym:"S", name:"SentinelOne", time:"TBD"},
+    {sym:"ULTA", name:"Ulta Beauty", time:"TBD"},
+    {sym:"ADSK", name:"Autodesk", time:"AMC"}
   ]}
 ];
 
@@ -540,17 +570,102 @@ function pruneExpiredDates(){
 }
 pruneExpiredDates();
 
-// Flat list
-const ALL_EARNINGS_TICKERS = [];
-const seenSyms = new Set();
-DATA.forEach(d => {
-  d.entries.forEach(e => {
-    if(!seenSyms.has(e.sym)){
-      seenSyms.add(e.sym);
-      ALL_EARNINGS_TICKERS.push({sym:e.sym, name:e.name, time:e.time, date:d.date, flag:!!e.flag});
-    }
+// Flat list — rebuilt from DATA whenever DATA changes (static load or live Finnhub refresh)
+let ALL_EARNINGS_TICKERS = [];
+function rebuildTickerList(){
+  const list = [];
+  const seenSyms = new Set();
+  DATA.forEach(d => {
+    d.entries.forEach(e => {
+      if(!seenSyms.has(e.sym)){
+        seenSyms.add(e.sym);
+        list.push({sym:e.sym, name:e.name, time:e.time, date:d.date, flag:!!e.flag});
+      }
+    });
   });
-});
+  ALL_EARNINGS_TICKERS = list;
+  return list;
+}
+rebuildTickerList();
+
+// ---- Finnhub live earnings calendar ----
+// Marquee/mega-cap names get flag:true so "Marquee Names Only ★" keeps working with live data.
+const MARQUEE_SET = new Set([
+  "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA","JPM","V","MA",
+  "WMT","HD","LOW","TGT","COST","BABA","JD","PDD","NFLX","DIS","KO","PEP",
+  "XOM","CVX","BAC","GS","MS","UNH","JNJ","PG","BRK.A","BRK.B","AVGO","AMD",
+  "INTC","CRM","ORCL","ADBE","CSCO","QCOM","TXN","AMAT","MU","PANW","CRWD",
+  "NOW","INTU","BA","GE","CAT","DE","MMM","LMT","RTX","UPS","FDX","MCD",
+  "SBUX","NKE","TJX","BBY","YETI","SNOW","ZS","MDB"
+]);
+
+function fmtDateYMD(d){
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function dowLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+}
+function finnhubHourToTime(hour){
+  if(hour === 'bmo') return 'BMO';
+  if(hour === 'amc') return 'AMC';
+  return 'TBD'; // covers 'dmh' (during market hours) and unspecified
+}
+
+async function fetchFinnhubEarnings(token, fromStr, toStr){
+  const url = `https://finnhub.io/api/v1/calendar/earnings?from=${fromStr}&to=${toStr}&token=${encodeURIComponent(token)}`;
+  const res = await fetch(url); // plain GET, no custom headers — required to avoid Finnhub's CORS preflight rejection
+  if(!res.ok){
+    let body = '';
+    try{ body = (await res.text()).slice(0,200); } catch(e){}
+    throw new Error(`Finnhub ${res.status}: ${body || res.statusText}`);
+  }
+  const json = await res.json();
+  return json.earningsCalendar || [];
+}
+
+async function refreshEarningsFromFinnhub(){
+  const token = document.getElementById('finnhubKey').value.trim();
+  const statusEl = document.getElementById('status');
+  if(!token){ setStatus('Enter a Finnhub API key first.', 'err'); return; }
+  localStorage.setItem('ew_finnhubKey', token);
+
+  const cutoff = new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate() + 7); // 7-day minimum lookahead
+  const horizonEnd = new Date(cutoff); horizonEnd.setDate(horizonEnd.getDate() + 45); // ~45-day forward window
+  const fromStr = fmtDateYMD(cutoff), toStr = fmtDateYMD(horizonEnd);
+
+  setStatus(`Fetching earnings calendar from Finnhub (${fromStr} → ${toStr})...`, '');
+  try{
+    const rows = await fetchFinnhubEarnings(token, fromStr, toStr);
+    if(!rows.length){
+      setStatus(`Finnhub returned 0 earnings between ${fromStr} and ${toStr}.`, 'err');
+      return;
+    }
+    // Group by date
+    const byDate = new Map();
+    rows.forEach(r => {
+      if(!r.symbol || !r.date) return;
+      if(!byDate.has(r.date)) byDate.set(r.date, []);
+      byDate.get(r.date).push({
+        sym: r.symbol,
+        name: r.symbol, // Finnhub's calendar endpoint doesn't include company name; symbol is used as a fallback label
+        time: finnhubHourToTime(r.hour),
+        eps: (typeof r.epsEstimate === 'number') ? r.epsEstimate.toFixed(2) : undefined,
+        flag: MARQUEE_SET.has(r.symbol)
+      });
+    });
+    const newData = Array.from(byDate.keys()).sort().map(date => ({
+      date, dow: dowLabel(date), entries: byDate.get(date)
+    }));
+    DATA = newData;
+    rebuildTickerList();
+    renderCalendar();
+    setStatus(`Loaded ${rows.length} earnings across ${newData.length} dates from Finnhub (live, ${fromStr}+).`, 'ok');
+  }catch(err){
+    setStatus(`Finnhub fetch failed: ${err.message}`, 'err');
+  }
+}
 
 // App State
 const state = {
@@ -790,6 +905,9 @@ async function runConfluenceScan(){
 
   if(state.hits.length > 0){
     selectSymbol(state.hits[0]);
+  } else {
+    const scannedSyms = Object.keys(state.results).sort();
+    if(scannedSyms.length > 0) selectSymbol(scannedSyms[0]);
   }
 }
 
@@ -797,8 +915,26 @@ async function runConfluenceScan(){
 function renderHitsBadges(){
   const container = document.getElementById('hitsList');
   container.innerHTML = '';
+
   if(state.hits.length === 0){
-    container.innerHTML = `<div class="no-hits">No active confluence hits found for current scanner parameters.</div>`;
+    const scannedSyms = Object.keys(state.results).sort();
+    if(scannedSyms.length === 0){
+      container.innerHTML = `<div class="no-hits">No active confluence hits found for current scanner parameters.</div>`;
+      return;
+    }
+    const note = document.createElement('div');
+    note.className = 'no-hits';
+    note.style.marginBottom = '8px';
+    note.textContent = `No confluence hits — showing all ${scannedSyms.length} scanned tickers for manual inspection. Use Play/Prev/Next to cycle through them.`;
+    container.appendChild(note);
+    scannedSyms.forEach(sym => {
+      const card = document.createElement('div');
+      card.className = `hit-card ${state.selected === sym ? 'selected' : ''}`;
+      card.dataset.sym = sym;
+      card.innerHTML = `<div class="hit-sym">${sym}</div>`;
+      card.addEventListener('click', () => selectSymbol(sym));
+      container.appendChild(card);
+    });
     return;
   }
 
@@ -822,8 +958,12 @@ function selectSymbol(sym){
   document.getElementById('chartPanel').style.display = 'block';
   document.getElementById('chartSym').textContent = sym;
   
-  const hitIdx = state.hits.indexOf(sym);
-  document.getElementById('carouselPos').textContent = hitIdx >= 0 ? `Hit ${hitIdx+1} of ${state.hits.length}` : `(MANUAL INSPECTION)`;
+  const playlist = getPlaylist();
+  const posIdx = playlist.indexOf(sym);
+  const isHit = state.hits.includes(sym);
+  document.getElementById('carouselPos').textContent = posIdx >= 0
+    ? `${isHit ? 'Hit' : 'Ticker'} ${posIdx+1} of ${playlist.length}`
+    : `(MANUAL INSPECTION)`;
   
   document.getElementById('hdrEarningDate1h').textContent = `— Earnings Date: ${r.date} [${r.time}]`;
 
@@ -1048,17 +1188,12 @@ setupDrawCanvas('cv1h', 'draw1h', 'h');
 setupDrawCanvas('cv1d', 'draw1d', 'd');
 
 // Chart Image Export
-document.getElementById('btnExport').addEventListener('click', () => {
-  if(!state.selected) return;
-  const sym = state.selected;
-  const item = state.results[sym];
-
-  const cv1h = document.getElementById('cv1h');
-  const cv1d = document.getElementById('cv1d');
-
+// Builds a composite canvas: header text + one or more (price + drawing-overlay) panels side by side.
+function buildChartComposite(panels, sym, item){
   const compCanvas = document.createElement('canvas');
-  const w = cv1h.width + cv1d.width + 40;
-  const h = cv1h.height + 100;
+  const totalW = panels.reduce((sum, p) => sum + p.priceCv.width, 0) + 15 + (panels.length + 1) * 10;
+  const maxH = Math.max(...panels.map(p => p.priceCv.height));
+  const w = totalW, h = maxH + 100;
   compCanvas.width = w; compCanvas.height = h;
 
   const ctx = compCanvas.getContext('2d');
@@ -1067,16 +1202,49 @@ document.getElementById('btnExport').addEventListener('click', () => {
   ctx.fillStyle = '#ffffff'; ctx.font = 'bold 24px IBM Plex Mono, monospace';
   ctx.fillText(`${sym} — ${item ? item.name : ''}`, 20, 36);
   ctx.fillStyle = '#ffb238'; ctx.font = '13px IBM Plex Mono, monospace';
-  ctx.fillText(`Earnings Report: ${item ? item.date : ''} [${item ? item.time : ''}] · Confluence Entry Analysis`, 20, 60);
+  const tfLabel = panels.length === 1 ? ` · ${panels[0].label}` : '';
+  ctx.fillText(`Earnings Report: ${item ? item.date : ''} [${item ? item.time : ''}] · Confluence Entry Analysis${tfLabel}`, 20, 60);
 
-  ctx.drawImage(cv1h, 15, 80);
-  ctx.drawImage(cv1d, 25 + cv1h.width, 80);
+  let x = 15;
+  panels.forEach(p => {
+    ctx.drawImage(p.priceCv, x, 80);
+    // Overlay the user's drawn trendlines/rectangles on top — they live on a
+    // separate canvas stacked over the price canvas.
+    if(p.drawCv) ctx.drawImage(p.drawCv, x, 80);
+    x += p.priceCv.width + 10;
+  });
 
+  return compCanvas;
+}
+
+function downloadCanvas(canvas, filename){
   const link = document.createElement('a');
-  link.download = `${sym}_Confluence_Analysis.png`;
-  link.href = compCanvas.toDataURL('image/png');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
   link.click();
-});
+}
+
+function exportChart(which){
+  if(!state.selected) return;
+  const sym = state.selected;
+  const item = state.results[sym];
+
+  const panels = [];
+  if(which === '1h' || which === 'combined'){
+    panels.push({ priceCv: document.getElementById('cv1h'), drawCv: document.getElementById('draw1h'), label: '1 HOUR' });
+  }
+  if(which === '1d' || which === 'combined'){
+    panels.push({ priceCv: document.getElementById('cv1d'), drawCv: document.getElementById('draw1d'), label: '1 DAY' });
+  }
+
+  const composite = buildChartComposite(panels, sym, item);
+  const suffix = which === 'combined' ? 'Confluence_Analysis' : (which === '1h' ? '1H' : '1D');
+  downloadCanvas(composite, `${sym}_${suffix}.png`);
+}
+
+document.getElementById('btnExport').addEventListener('click', () => exportChart('combined'));
+document.getElementById('btnExport1h').addEventListener('click', () => exportChart('1h'));
+document.getElementById('btnExport1d').addEventListener('click', () => exportChart('1d'));
 
 // Names-Only Export — ALL scanned tickers (hits and non-hits)
 document.getElementById('btnExportAllNames').addEventListener('click', () => {
@@ -1166,12 +1334,19 @@ document.getElementById('btnManual').addEventListener('click', async () => {
 });
 
 // Transport / Carousel
+// Playlist is confluence hits when any exist; otherwise falls back to every
+// scanned ticker (sorted) so Play/Prev/Next still work on a 0-hit scan.
+function getPlaylist(){
+  if(state.hits.length > 0) return state.hits;
+  return Object.keys(state.results).sort();
+}
 function cycleHit(step){
-  if(state.hits.length === 0) return;
-  let curr = state.hits.indexOf(state.selected);
+  const playlist = getPlaylist();
+  if(playlist.length === 0) return;
+  let curr = playlist.indexOf(state.selected);
   if(curr < 0) curr = 0;
-  let next = (curr + step + state.hits.length) % state.hits.length;
-  selectSymbol(state.hits[next]);
+  let next = (curr + step + playlist.length) % playlist.length;
+  selectSymbol(playlist[next]);
 }
 
 document.getElementById('btnPlay').addEventListener('click', () => {
@@ -1179,7 +1354,7 @@ document.getElementById('btnPlay').addEventListener('click', () => {
     clearInterval(state.playTimer); state.isPlaying = false;
     document.getElementById('btnPlay').textContent = '▶ Play';
   } else {
-    if(state.hits.length === 0) return;
+    if(getPlaylist().length === 0) return;
     state.isPlaying = true; document.getElementById('btnPlay').textContent = '⏸ Pause';
     const speed = parseInt(document.getElementById('playSpeed').value, 10) || 5000;
     state.playTimer = setInterval(() => cycleHit(1), speed);
@@ -1269,6 +1444,11 @@ function setStatus(msg, kind){
 if(localStorage.getItem('ew_keyId')) document.getElementById('apiKeyId').value = localStorage.getItem('ew_keyId');
 if(localStorage.getItem('ew_secret')) document.getElementById('apiSecret').value = localStorage.getItem('ew_secret');
 if(localStorage.getItem('ew_feed')) document.getElementById('dataFeed').value = localStorage.getItem('ew_feed');
+if(localStorage.getItem('ew_finnhubKey')) document.getElementById('finnhubKey').value = localStorage.getItem('ew_finnhubKey');
+document.getElementById('finnhubKey').addEventListener('input', (e) => {
+  localStorage.setItem('ew_finnhubKey', e.target.value.trim());
+});
+document.getElementById('refreshFinnhubBtn').addEventListener('click', refreshEarningsFromFinnhub);
 
 renderCalendar();
 
