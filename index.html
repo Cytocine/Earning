@@ -551,20 +551,23 @@ let DATA = [
   ]}
 ];
 
-// Auto-roll the calendar: drop any date that isn't at least 7 days out, so
-// only earnings with a full week of lead time remain (whatever's next in
-// DATA surfaces automatically as near-term dates fall off).
+// Auto-roll the calendar: keep only earnings from today through the next
+// WINDOW_DAYS days, so the list always shows the current rolling window
+// instead of drifting off to whatever's next in DATA.
+const WINDOW_DAYS = 20;
 function pruneExpiredDates(){
-  const cutoff = new Date();
-  cutoff.setHours(0,0,0,0);
-  cutoff.setDate(cutoff.getDate() + 7); // only keep earnings at least 7 days out
-  const y = cutoff.getFullYear();
-  const m = String(cutoff.getMonth()+1).padStart(2,'0');
-  const d = String(cutoff.getDate()).padStart(2,'0');
-  const cutoffStr = `${y}-${m}-${d}`;
+  const floor = new Date();
+  floor.setHours(0,0,0,0);
+  const ceil = new Date(floor);
+  ceil.setDate(ceil.getDate() + WINDOW_DAYS);
+  const toYMD = (dt) => {
+    const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,'0'), d = String(dt.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  };
+  const floorStr = toYMD(floor), ceilStr = toYMD(ceil);
   let removed = false;
   for(let i = DATA.length - 1; i >= 0; i--){
-    if(DATA[i].date < cutoffStr){ DATA.splice(i, 1); removed = true; }
+    if(DATA[i].date < floorStr || DATA[i].date > ceilStr){ DATA.splice(i, 1); removed = true; }
   }
   return removed;
 }
@@ -631,8 +634,8 @@ async function refreshEarningsFromFinnhub(){
   if(!token){ setStatus('Enter a Finnhub API key first.', 'err'); return; }
   localStorage.setItem('ew_finnhubKey', token);
 
-  const cutoff = new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate() + 7); // 7-day minimum lookahead
-  const horizonEnd = new Date(cutoff); horizonEnd.setDate(horizonEnd.getDate() + 45); // ~45-day forward window
+  const cutoff = new Date(); cutoff.setHours(0,0,0,0); // start from today
+  const horizonEnd = new Date(cutoff); horizonEnd.setDate(horizonEnd.getDate() + WINDOW_DAYS); // WINDOW_DAYS forward window
   const fromStr = fmtDateYMD(cutoff), toStr = fmtDateYMD(horizonEnd);
 
   setStatus(`Fetching earnings calendar from Finnhub (${fromStr} → ${toStr})...`, '');
