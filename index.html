@@ -633,9 +633,17 @@ async function fetchFinnhubEarnings(token, fromStr, toStr){
 }
 
 async function refreshEarningsFromFinnhub(){
-  const token = document.getElementById('finnhubKey').value.trim();
+  const token = document.getElementById('finnhubKey').value.replace(/\s+/g, '').trim();
   const statusEl = document.getElementById('status');
   if(!token){ setStatus('Enter a Finnhub API key first.', 'err'); return; }
+  // Sanity-check the token: real Finnhub keys are short alphanumeric strings.
+  // If something much longer or containing markup ends up here (e.g. a whole
+  // file accidentally pasted into the field), bail out with a clear message
+  // instead of firing a malformed multi-KB request.
+  if(token.length > 100 || /[<>{}\s]/.test(token)){
+    setStatus('The Finnhub API Key field doesn\'t look like a valid token (too long or contains invalid characters). Clear the field and paste just your Finnhub token.', 'err');
+    return;
+  }
   localStorage.setItem('ew_finnhubKey', token);
 
   const cutoff = new Date(); cutoff.setHours(0,0,0,0); // start from today
@@ -1465,22 +1473,34 @@ function setStatus(msg, kind){
 if(localStorage.getItem('ew_keyId')) document.getElementById('apiKeyId').value = localStorage.getItem('ew_keyId');
 if(localStorage.getItem('ew_secret')) document.getElementById('apiSecret').value = localStorage.getItem('ew_secret');
 if(localStorage.getItem('ew_feed')) document.getElementById('dataFeed').value = localStorage.getItem('ew_feed');
-if(localStorage.getItem('ew_finnhubKey')) document.getElementById('finnhubKey').value = localStorage.getItem('ew_finnhubKey');
+{
+  // Guard against a previously-saved garbage value (e.g. an accidental paste
+  // of an entire file into this field in an earlier session) clobbering the
+  // Finnhub key field on load.
+  const savedFinnhubKey = localStorage.getItem('ew_finnhubKey');
+  if(savedFinnhubKey && savedFinnhubKey.length <= 100 && !/[<>{}\s]/.test(savedFinnhubKey)){
+    document.getElementById('finnhubKey').value = savedFinnhubKey;
+  } else if(savedFinnhubKey){
+    localStorage.removeItem('ew_finnhubKey');
+  }
+}
 if(localStorage.getItem('ew_minAvgVolume')) document.getElementById('minAvgVolume').value = localStorage.getItem('ew_minAvgVolume');
 document.getElementById('finnhubKey').addEventListener('input', (e) => {
-  localStorage.setItem('ew_finnhubKey', e.target.value.trim());
+  localStorage.setItem('ew_finnhubKey', e.target.value.replace(/\s+/g, '').trim());
 });
 document.getElementById('refreshFinnhubBtn').addEventListener('click', refreshEarningsFromFinnhub);
 
 renderCalendar();
 
-// PWA: register service worker for offline app-shell caching
+// No sw.js ships with this app, so don't register one. Actively unregister
+// any stale service worker left over from a prior load at this origin —
+// an old worker can intercept fetches (including cross-origin API calls)
+// and produce confusing low-level errors like "Failed to convert value to
+// 'Response'" that have nothing to do with the actual request.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(err => {
-      console.warn('Service worker registration failed:', err);
-    });
-  });
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => reg.unregister());
+  }).catch(() => {});
 }
 </script>
 </body>
