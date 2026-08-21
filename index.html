@@ -285,6 +285,10 @@
         </select>
       </div>
       <div class="cfg-field">
+        <label>Min Avg Daily Volume (20D)</label>
+        <input id="minAvgVolume" type="number" min="0" step="10000" placeholder="e.g. 500000" value="500000">
+      </div>
+      <div class="cfg-field">
         <label>Chart Candles</label>
         <select id="candleCount">
           <option value="60">60 Bars</option>
@@ -296,7 +300,7 @@
         <button class="btn" id="runScanBtn" style="width:100%;">⚡ Run Confluence Scan</button>
       </div>
     </div>
-    <div class="status-line" id="status">API keys are stored locally in your browser.</div>
+    <div class="status-line" id="status">API keys are stored locally in your browser. Tickers below the min volume threshold or trading under the daily 20 EMA are auto-filtered as "trash" before scanning.</div>
   </div>
 
   <!-- CONFLUENCE HITS RIBBON -->
@@ -788,7 +792,7 @@ function computeIndicators(bars){
   const testVal=closes.map((_,i)=> (linReg[i]!=null && emaLR[i]!=null) ? (linReg[i]+emaLR[i])/2 : null);
   const higher=closes.map((_,i)=> (linReg[i]!=null && emaLR[i]!=null) ? (emaLR[i] < linReg[i]) : null);
 
-  const ema5=ema(closes,5), ema8=ema(closes,8), ema13=ema(closes,13), ema34=ema(closes,34), ema50=ema(closes,50);
+  const ema5=ema(closes,5), ema8=ema(closes,8), ema13=ema(closes,13), ema20=ema(closes,20), ema34=ema(closes,34), ema50=ema(closes,50);
   const hmaVal=hma(closes,Math.min(70,Math.max(4,n-1))), magic=magicTrend(highs,lows,closes);
   const pvtArr=pvt(closes,volumes), signal=sma(pvtArr,21), histValue=pvtArr.map((v,i)=> signal[i]!=null ? v-signal[i] : null);
   const rsiArr=rsi(closes,14);
@@ -813,7 +817,7 @@ function computeIndicators(bars){
     trendColor[i] = (higher[i] && hmaVal[i]>testVal[i]) ? 'bull' : (!higher[i] ? 'bear' : 'neutral');
   }
 
-  return {bars,closes,highs,lows,volumes,linReg,testVal,higher,ema5,ema8,ema13,ema34,ema50,hmaVal,magic,pvtArr,signal,histValue,rsiArr,histColor,longEntree,trendColor};
+  return {bars,closes,highs,lows,volumes,linReg,testVal,higher,ema5,ema8,ema13,ema20,ema34,ema50,hmaVal,magic,pvtArr,signal,histValue,rsiArr,histColor,longEntree,trendColor};
 }
 
 // Data Fetching
@@ -843,12 +847,14 @@ async function runConfluenceScan(){
   const feed = document.getElementById('dataFeed').value;
   const source = document.getElementById('tickerSource').value;
   const maxRecency = parseInt(document.getElementById('maxRecency').value, 10) || 2;
+  const minAvgVolume = parseFloat(document.getElementById('minAvgVolume').value) || 0;
 
   if(!keyId || !secret){ setStatus('Enter Alpaca Key ID & Secret Key first.', 'err'); return; }
 
   localStorage.setItem('ew_keyId', keyId);
   localStorage.setItem('ew_secret', secret);
   localStorage.setItem('ew_feed', feed);
+  localStorage.setItem('ew_minAvgVolume', String(minAvgVolume));
 
   let targetList = ALL_EARNINGS_TICKERS;
   if(source === 'BMO') targetList = ALL_EARNINGS_TICKERS.filter(t => t.time === 'BMO');
@@ -860,7 +866,7 @@ async function runConfluenceScan(){
   state.hits = []; state.results = {};
   document.getElementById('hitsList').innerHTML = `<div class="no-hits">Scanning ${targetList.length} earnings tickers across 1H and 1D timeframes...</div>`;
 
-  let processed = 0, hitsCount = 0;
+  let processed = 0, hitsCount = 0, filteredCount = 0;
   for(const item of targetList){
     processed++;
     setStatus(`Scanning ${item.sym} (${processed}/${targetList.length})…`);
@@ -878,6 +884,17 @@ async function runConfluenceScan(){
       const lastH = bars1h.length - 1;
       const lastD = bars1d.length - 1;
 
+      // Trash filter: require enough liquidity (20D avg daily volume) and a
+      // daily close above the 20 EMA. Names that fail either are dropped
+      // from the scan entirely rather than shown as a non-hit.
+      const volLookback = ind1d.volumes.slice(Math.max(0, lastD - 19), lastD + 1);
+      const avgVol20 = volLookback.length ? volLookback.reduce((a,b) => a + b, 0) / volLookback.length : 0;
+      const closeAboveEma20D = ind1d.ema20[lastD] != null && ind1d.closes[lastD] > ind1d.ema20[lastD];
+      if(avgVol20 < minAvgVolume || !closeAboveEma20D){
+        filteredCount++;
+        continue;
+      }
+
       let dBullCount = 0;
       for (let i = lastD; i >= 0; i--) {
         if (ind1d.histColor[i] === 'bull') dBullCount++; else break;
@@ -887,7 +904,7 @@ async function runConfluenceScan(){
       const isFresh1dBull = dBullCount > 0 && dBullCount <= maxRecency;
       const finalEntry = is1hSetup && isFresh1dBull;
 
-      const resObj = { sym: item.sym, name: item.name, time: item.time, date: item.date, bars1h, bars1d, ind1h, ind1d, lastH, lastD, dBullCount, finalEntry };
+      const resObj = { sym: item.sym, name: item.name, time: item.time, date: item.date, bars1h, bars1d, ind1h, ind1d, lastH, lastD, dBullCount, finalEntry, avgVol20 };
       state.results[item.sym] = resObj;
 
       if(finalEntry){
@@ -900,7 +917,7 @@ async function runConfluenceScan(){
   }
 
   btn.disabled = false; btn.textContent = '⚡ Run Confluence Scan';
-  setStatus(`Scan complete. Found ${hitsCount} confluence ENTRY hits out of ${targetList.length} tickers.`, hitsCount ? 'ok' : 'err');
+  setStatus(`Scan complete. Found ${hitsCount} confluence ENTRY hits out of ${targetList.length} tickers (${filteredCount} filtered as trash — low volume or below daily 20 EMA).`, hitsCount ? 'ok' : 'err');
   document.getElementById('hitsCountTag').textContent = `${hitsCount} Hits`;
 
   renderHitsBadges();
@@ -973,7 +990,7 @@ function selectSymbol(sym){
   document.getElementById('date1h').textContent = `Last Bar: ${r.bars1h[r.lastH].t.slice(0,16).replace('T',' ')}`;
   document.getElementById('date1d').textContent = `Last Bar: ${r.bars1d[r.lastD].t.slice(0,10)}`;
   
-  document.getElementById('chartPxInfo').textContent = `$${r.bars1h[r.lastH].c.toFixed(2)} · 1H ${r.ind1h.histColor[r.lastH].toUpperCase()} · 1D ${r.ind1d.histColor[r.lastD].toUpperCase()} (${r.dBullCount}c) · ${r.finalEntry ? 'CONFIRMED ENTRY ▲' : 'NO CONFLUENCE'}`;
+  document.getElementById('chartPxInfo').textContent = `$${r.bars1h[r.lastH].c.toFixed(2)} · 1H ${r.ind1h.histColor[r.lastH].toUpperCase()} · 1D ${r.ind1d.histColor[r.lastD].toUpperCase()} (${r.dBullCount}c) · Vol20D ${Math.round(r.avgVol20).toLocaleString()} · ${r.finalEntry ? 'CONFIRMED ENTRY ▲' : 'NO CONFLUENCE'}`;
 
   drawChart('cv1h', 'draw1h', r.bars1h, r.ind1h, r.sym, r.name, r.date, r.time, '1 HOUR');
   drawChart('cv1d', 'draw1d', r.bars1d, r.ind1d, r.sym, r.name, r.date, r.time, '1 DAY');
@@ -1448,6 +1465,7 @@ if(localStorage.getItem('ew_keyId')) document.getElementById('apiKeyId').value =
 if(localStorage.getItem('ew_secret')) document.getElementById('apiSecret').value = localStorage.getItem('ew_secret');
 if(localStorage.getItem('ew_feed')) document.getElementById('dataFeed').value = localStorage.getItem('ew_feed');
 if(localStorage.getItem('ew_finnhubKey')) document.getElementById('finnhubKey').value = localStorage.getItem('ew_finnhubKey');
+if(localStorage.getItem('ew_minAvgVolume')) document.getElementById('minAvgVolume').value = localStorage.getItem('ew_minAvgVolume');
 document.getElementById('finnhubKey').addEventListener('input', (e) => {
   localStorage.setItem('ew_finnhubKey', e.target.value.trim());
 });
