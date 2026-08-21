@@ -308,7 +308,7 @@
     <div class="panel-title">
       <span>🎯 Active Entry Hits (<code id="hitsCountTag">0 Hits</code>)</span>
       <div style="display:flex; gap:6px;">
-        <button class="btn ghost" id="btnExportAllNames" style="font-size:10px; padding:4px 8px;">📦 Export All Names</button>
+        <button class="btn ghost" id="btnExportAllNames" style="font-size:10px; padding:4px 8px;" title="Exports every ticker with earnings in the current tracked window, regardless of scan status">📦 Export All Earnings Names</button>
         <button class="btn ghost" id="btnExportHitsNames" style="font-size:10px; padding:4px 8px;">🏷️ Export Names Only</button>
         <button class="btn ghost" id="btnExportHitsText" style="font-size:10px; padding:4px 8px;">📋 Export Hits List</button>
       </div>
@@ -1266,17 +1266,18 @@ document.getElementById('btnExport').addEventListener('click', () => exportChart
 document.getElementById('btnExport1h').addEventListener('click', () => exportChart('1h'));
 document.getElementById('btnExport1d').addEventListener('click', () => exportChart('1d'));
 
-// Names-Only Export — ALL scanned tickers (hits and non-hits)
+// Names-Only Export — ALL tickers with earnings in the tracked window (next 20 days),
+// independent of whether a scan has been run or a name got trash-filtered.
 document.getElementById('btnExportAllNames').addEventListener('click', () => {
-  const allSyms = Object.keys(state.results);
-  if(allSyms.length === 0){ alert('No scan results available to export. Run a scan first.'); return; }
+  if(ALL_EARNINGS_TICKERS.length === 0){ alert('No upcoming earnings tickers found in the current window.'); return; }
 
+  const allSyms = ALL_EARNINGS_TICKERS.map(t => t.sym);
   const textContent = allSyms.join('\n');
   const blob = new Blob([textContent], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `All_Scanned_Names_${new Date().toISOString().slice(0,10)}.txt`;
+  a.download = `All_Earnings_Names_${new Date().toISOString().slice(0,10)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 });
